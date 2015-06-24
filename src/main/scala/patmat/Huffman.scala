@@ -26,9 +26,15 @@ object Huffman {
 
   // Part 1: Basics
 
-  def weight(tree: CodeTree): Int = ??? // tree match ...
+  def weight(tree: CodeTree): Int = tree match {
+    case Leaf(char, weight) => weight
+    case Fork(left, right, chars, weight) => weight
+  }
 
-  def chars(tree: CodeTree): List[Char] = ??? // tree match ...
+  def chars(tree: CodeTree): List[Char] = tree match {
+    case Leaf(char, weight) => char :: Nil
+    case Fork(left, right, chars, weight) => chars
+  }
 
   def makeCodeTree(left: CodeTree, right: CodeTree) =
     Fork(left, right, chars(left) ::: chars(right), weight(left) + weight(right))
@@ -71,7 +77,9 @@ object Huffman {
    *       println("integer is  : "+ theInt)
    *   }
    */
-  def times(chars: List[Char]): List[(Char, Int)] = ???
+  def times(chars: List[Char]): List[(Char, Int)] =
+    chars.groupBy(_.toChar).map(tupl => (tupl._1, tupl._2.length)).toList
+
 
   /**
    * Returns a list of `Leaf` nodes for a given frequency table `freqs`.
@@ -80,12 +88,20 @@ object Huffman {
    * head of the list should have the smallest weight), where the weight
    * of a leaf is the frequency of the character.
    */
-  def makeOrderedLeafList(freqs: List[(Char, Int)]): List[Leaf] = ???
+  def insertLeaf(leaf: Leaf, srtdLeaves: List[Leaf]): List[Leaf] = srtdLeaves match {
+    case List() => List(leaf)
+    case y :: ys => if (leaf.weight <= y.weight) leaf :: srtdLeaves else y :: insertLeaf(leaf, ys)
+  }
+
+  def makeOrderedLeafList(freqs: List[(Char, Int)]): List[Leaf] = freqs match {
+    case List() => Nil
+    case y :: ys => insertLeaf(new Leaf(y._1, y._2), makeOrderedLeafList(ys))
+  }
 
   /**
    * Checks whether the list `trees` contains only one single code tree.
    */
-  def singleton(trees: List[CodeTree]): Boolean = ???
+  def singleton(trees: List[CodeTree]): Boolean = trees.length == 1
 
   /**
    * The parameter `trees` of this function is a list of code trees ordered
@@ -99,7 +115,13 @@ object Huffman {
    * If `trees` is a list of less than two elements, that list should be returned
    * unchanged.
    */
-  def combine(trees: List[CodeTree]): List[CodeTree] = ???
+  def combine(trees: List[CodeTree]): List[CodeTree] = trees match {
+    case Nil => trees
+    case t :: Nil => trees
+    case t1 :: t2 :: ts => (makeCodeTree(t1, t2)  :: ts).sortBy(codeTree => weight(codeTree))
+  }
+
+
 
   /**
    * This function will be called in the following way:
@@ -118,7 +140,9 @@ object Huffman {
    *    the example invocation. Also define the return type of the `until` function.
    *  - try to find sensible parameter names for `xxx`, `yyy` and `zzz`.
    */
-  def until(xxx: ???, yyy: ???)(zzz: ???): ??? = ???
+  def until(st: List[CodeTree] => Boolean, combine: List[CodeTree] => List[CodeTree])(trees: List[CodeTree]): CodeTree =
+    if (singleton(trees)) trees.head
+    else until(singleton, combine)(combine(trees))
 
   /**
    * This function creates a code tree which is optimal to encode the text `chars`.
@@ -126,7 +150,8 @@ object Huffman {
    * The parameter `chars` is an arbitrary text. This function extracts the character
    * frequencies from that text and creates a code tree based on them.
    */
-  def createCodeTree(chars: List[Char]): CodeTree = ???
+  def createCodeTree(chars: List[Char]): CodeTree =
+    until(singleton, combine)(makeOrderedLeafList(times(chars)))
 
 
 
@@ -138,7 +163,24 @@ object Huffman {
    * This function decodes the bit sequence `bits` using the code tree `tree` and returns
    * the resulting list of characters.
    */
-  def decode(tree: CodeTree, bits: List[Bit]): List[Char] = ???
+  def decode(tree: CodeTree, bits: List[Bit]): List[Char] = {
+    if (bits.isEmpty) List()
+    else decodeAccum(tree, tree, bits, List())
+  }
+
+  private def decodeAccum(original: CodeTree, tree: CodeTree, bits: List[Bit], message: List[Char]): List[Char] = tree match{
+    case Leaf(char, _) =>
+      bits match {
+        case head :: tail => decodeAccum(original, original, bits, message ::: List(char))
+        case _ => message ::: List(char)
+      }
+    case Fork(left, right, chars, weight) =>
+      bits match {
+        case 0::tail => decodeAccum(original, left, tail, message)
+        case 1::tail => decodeAccum(original, right, tail, message)
+        case _ => message // return the message if the code ends on a fork or contains anything other than 1 or 0
+      }
+  }
 
   /**
    * A Huffman coding tree for the French language.
@@ -149,14 +191,14 @@ object Huffman {
 
   /**
    * What does the secret message say? Can you decode it?
-   * For the decoding use the `frenchCode' Huffman tree defined above.
+   * For the decoding use the 'frenchCode' Huffman tree defined above.
    */
   val secret: List[Bit] = List(0,0,1,1,1,0,1,0,1,1,1,0,0,1,1,0,1,0,0,1,1,0,1,0,1,1,0,0,1,1,1,1,1,0,1,0,1,1,0,0,0,0,1,0,1,1,1,0,0,1,0,0,1,0,0,0,1,0,0,0,1,0,1)
 
   /**
    * Write a function that returns the decoded secret
    */
-  def decodedSecret: List[Char] = ???
+  def decodedSecret: List[Char] = decode(frenchCode, secret)
 
 
 
@@ -166,8 +208,17 @@ object Huffman {
    * This function encodes `text` using the code tree `tree`
    * into a sequence of bits.
    */
-  def encode(tree: CodeTree)(text: List[Char]): List[Bit] = ???
+  def encode(tree: CodeTree)(text: List[Char]): List[Bit] =
+    if (text.isEmpty) Nil
+    else text.flatMap(char => encodeCharacter(tree, char))
 
+  private def encodeCharacter(tree: CodeTree, char: Char): List[Bit] = tree match {
+    case Leaf(char, weight) => Nil
+    case Fork(left, right, _, _) =>
+      if (chars(left).contains(char)) 0 :: encodeCharacter(left, char)
+      else if (chars(right).contains(char)) 1 :: encodeCharacter(right, char)
+      else List()
+  }
 
   // Part 4b: Encoding using code table
 
